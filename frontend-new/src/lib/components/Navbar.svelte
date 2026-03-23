@@ -8,7 +8,7 @@
 </script>
 
 <nav class="navbar">
-    <span class="navbar-brand">Collaborent</span>
+    <span class="navbar-brand" data-cursor-glow>Collaborent</span>
     <div class="navbar-actions">
         <button class="btn-create" id="create-doc-btn" onclick={onCreateDoc}>
             <span class="btn-icon">+</span> Create
@@ -37,9 +37,11 @@
     }
 
     .navbar-brand {
+        display: inline-block;
         font-size: 1.35rem;
         font-weight: 700;
         letter-spacing: -0.5px;
+        border-radius: 999px;
         background: linear-gradient(135deg, #f9a8d4, #e879f9);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
