@@ -112,14 +112,14 @@
 
 		const handleMouseLeave = () => { isVisible = false; };
 
-		// Button hover detection via event delegation
+		// Button / input hover detection via event delegation
 		const handleMouseOver = (e: MouseEvent) => {
-			if ((e.target as Element).closest('button, a[role="button"], [data-cursor-glow]')) {
+			if ((e.target as Element).closest('button, input, a[role="button"], [data-cursor-glow]')) {
 				isOverButton = true;
 			}
 		};
 		const handleMouseOut = (e: MouseEvent) => {
-			if ((e.target as Element).closest('button, a[role="button"], [data-cursor-glow]')) {
+			if ((e.target as Element).closest('button, input, a[role="button"], [data-cursor-glow]')) {
 				isOverButton = false;
 			}
 		};
@@ -197,8 +197,9 @@
 		opacity: 0;
 	}
 
-	/* ── Button hover: sphere-breathe glow transfers onto the button ── */
+	/* ── Button / input hover: sphere-breathe glow ── */
 	:global(button:hover),
+	:global(input:hover),
 	:global(a[role="button"]:hover) {
 		transition: box-shadow 0.2s ease !important;
 		animation: button-sphere-breathe 2.4s ease-in-out infinite !important;
