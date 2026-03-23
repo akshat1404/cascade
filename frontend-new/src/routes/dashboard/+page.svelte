@@ -4,9 +4,11 @@
     import Navbar from "$lib/components/Navbar.svelte";
     import DocumentsPage from "$lib/components/DocumentsPage.svelte";
     import LoadingScreen from "$lib/components/LoadingScreen.svelte";
+    import CreateDocModal from "$lib/components/CreateDocModal.svelte";
 
     let user = $state<any>(null);
     let loading = $state(true);
+    let showModal = $state(false);
 
     onMount(() => {
         supabase.auth.getSession().then(({ data }) => {
@@ -31,7 +33,19 @@
         window.location.href = "/";
     }
 
-    function createDocument() {}
+    function createDocument() {
+        showModal = true;
+    }
+
+    function handleCloseModal() {
+        showModal = false;
+    }
+
+    function handleCreate(title: string) {
+        // TODO: call backend to create document
+        console.log("Creating document:", title);
+        showModal = false;
+    }
 </script>
 
 <svelte:head>
@@ -57,6 +71,10 @@
     </div>
 {:else}
     <LoadingScreen message="Redirecting..." />
+{/if}
+
+{#if showModal}
+    <CreateDocModal onClose={handleCloseModal} onCreate={handleCreate} />
 {/if}
 
 <style>
