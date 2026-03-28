@@ -41,17 +41,34 @@
         showModal = false;
     }
 
-    function handleCreate(title: string) {
-        fetch("http://localhost:8080/documents/create", {
+    async function handleCreate(title: string) {
+        if (!title) {
+            alert("Title is required");
+            return;
+        }
+
+        const {
+            data: { session },
+        } = await supabase.auth.getSession();
+
+        const res = await fetch("http://localhost:8080/documents/create", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${user.access_token}`,
+                Authorization: `Bearer ${session?.access_token}`,
             },
             body: JSON.stringify({ title }),
         });
 
+        if (!res.ok) {
+            console.error("Failed to create document");
+            return;
+        }
+
+        const doc = await res.json();
+
         showModal = false;
+        window.location.href = `/document/${doc.id}`;
     }
 </script>
 
