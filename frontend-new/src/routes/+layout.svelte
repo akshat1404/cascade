@@ -198,12 +198,7 @@
 		class:orb-hidden={isOverButton}
 		style="left: {cursorX}px; top: {cursorY}px;"
 	>
-		<div
-			class="orb-rot"
-			style="transform: rotate({isMoving ? rotAngle : 0}deg);"
-		>
-			<div class="orb" class:moving={isMoving}></div>
-		</div>
+		<div class="orb" class:moving={isMoving}></div>
 	</div>
 {/if}
 
@@ -265,15 +260,12 @@
 		}
 	}
 
-	/* ── Rotation wrapper: smoothly rotates the bell ── */
-	.orb-rot {
-		transition: transform 0.06s linear;
-	}
 
-	/* ── The orb / bell ── */
+
+	/* ── The orb — always a perfect sphere ── */
 	.orb {
-		width: 26px;
-		height: 26px;
+		width: 18px;
+		height: 18px;
 		border-radius: 50%;
 		pointer-events: none;
 
@@ -287,38 +279,18 @@
 		);
 
 		box-shadow:
-			0 0 6px 2px rgba(236, 72, 153, 0.55),
-			0 0 16px 5px rgba(236, 72, 153, 0.22),
-			0 0 30px 9px rgba(168, 85, 247, 0.12),
-			inset 0 1px 3px rgba(255, 255, 255, 0.65);
+			0 0 5px 2px rgba(236, 72, 153, 0.55),
+			0 0 12px 4px rgba(236, 72, 153, 0.22),
+			0 0 22px 7px rgba(168, 85, 247, 0.12),
+			inset 0 1px 2px rgba(255, 255, 255, 0.65);
 
-		/* Smooth morph between sphere and dome */
-		transition:
-			border-radius 0.18s ease,
-			width 0.18s ease,
-			height 0.18s ease,
-			box-shadow 0.18s ease;
-
+		transition: box-shadow 0.18s ease;
 		animation: sphere-breathe 2.4s ease-in-out infinite;
 	}
 
-	/* Idle: perfect sphere, gentle breathing */
-	.orb:not(.moving) {
-		border-radius: 50%;
-	}
-
-	/* Moving: jellyfish bell — flat bottom faces the trail (rotation handles direction) */
+	/* Moving: faster breathe, sphere stays round */
 	.orb.moving {
-		width: 30px;
-		height: 22px;
-		border-radius: 50% 50% 28% 28% / 72% 72% 28% 28%;
-		animation: bell-pulse 1.6s ease-in-out infinite;
-
-		box-shadow:
-			0 0 10px 3px rgba(236, 72, 153, 0.65),
-			0 0 24px 7px rgba(236, 72, 153, 0.28),
-			0 0 42px 12px rgba(168, 85, 247, 0.15),
-			inset 0 1px 3px rgba(255, 255, 255, 0.7);
+		animation: sphere-breathe-fast 0.5s ease-in-out infinite;
 	}
 
 	/* ── Tentacle dots ── */
@@ -364,22 +336,23 @@
 		}
 	}
 
-	/* Moving bell contracts like a real jellyfish */
-	@keyframes bell-pulse {
-		0% {
-			transform: scaleX(1) scaleY(1);
+	/* Fast breathe while cursor is in motion */
+	@keyframes sphere-breathe-fast {
+		0%, 100% {
+			transform: scale(1);
+			box-shadow:
+				0 0 5px 2px rgba(236, 72, 153, 0.6),
+				0 0 14px 5px rgba(236, 72, 153, 0.28),
+				0 0 26px 8px rgba(168, 85, 247, 0.15),
+				inset 0 1px 2px rgba(255, 255, 255, 0.65);
 		}
-		28% {
-			transform: scaleX(0.8) scaleY(1.2);
-		}
-		52% {
-			transform: scaleX(1.1) scaleY(0.92);
-		}
-		72% {
-			transform: scaleX(0.95) scaleY(1.05);
-		}
-		100% {
-			transform: scaleX(1) scaleY(1);
+		50% {
+			transform: scale(1.18);
+			box-shadow:
+				0 0 9px 4px rgba(236, 72, 153, 0.8),
+				0 0 22px 8px rgba(236, 72, 153, 0.42),
+				0 0 40px 14px rgba(168, 85, 247, 0.22),
+				inset 0 1px 2px rgba(255, 255, 255, 0.65);
 		}
 	}
 
