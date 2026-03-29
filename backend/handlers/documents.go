@@ -12,6 +12,7 @@ import (
 	"github.com/akshat1404/collaborent/backend/models"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type DocumentHandler struct {
@@ -163,4 +164,33 @@ func (h *DocumentHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// GET /documents  — list all documents belonging to the authenticated user
+func (h *DocumentHandler) ListByUser(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := r.Context().Value(middleware.UserIDKey).(string)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	opts := options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}})
+	cursor, err := h.documents.Find(ctx, bson.M{"ownerId": ownerID}, opts)
+	if err != nil {
+		http.Error(w, "Failed to fetch documents", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	docs := make([]models.Document, 0)
+	if err := cursor.All(ctx, &docs); err != nil {
+		http.Error(w, "Failed to decode documents", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(docs)
 }

@@ -9,12 +9,30 @@
     let user = $state<any>(null);
     let loading = $state(true);
     let showModal = $state(false);
+    let documents = $state<any[]>([]);
+    let docsLoading = $state(false);
+
+    async function fetchDocuments() {
+        docsLoading = true;
+        try {
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+            const res = await fetch("http://localhost:8080/documents", {
+                headers: { Authorization: `Bearer ${session?.access_token}` },
+            });
+            if (res.ok) documents = await res.json();
+        } finally {
+            docsLoading = false;
+        }
+    }
 
     onMount(() => {
         supabase.auth.getSession().then(({ data }) => {
             user = data.session?.user ?? null;
             loading = false;
             if (!user) window.location.href = "/";
+            else fetchDocuments();
         });
 
         const {
@@ -90,7 +108,7 @@
 {:else if user}
     <div class="page-wrapper">
         <Navbar onSignOut={signOut} onCreateDoc={createDocument} />
-        <DocumentsPage />
+        <DocumentsPage {documents} loading={docsLoading} />
     </div>
 {:else}
     <LoadingScreen message="Redirecting..." />

@@ -22,7 +22,6 @@
             );
 
             const result = await response.json();
-            console.log("Backend response:", result);
 
             window.location.href = "/dashboard";
         }

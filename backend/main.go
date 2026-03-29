@@ -57,6 +57,15 @@ func main() {
 	}))
 	http.HandleFunc("/auth/callback", cors(authHandler.Callback))
 	http.HandleFunc("/documents/create", cors(auth(documentHandler.Create)))
+	// Exact: GET /documents → list documents for current user
+	http.HandleFunc("/documents", cors(auth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		documentHandler.ListByUser(w, r)
+	})))
+	// Prefix: /documents/{id} → GET by ID, PUT to update
 	http.HandleFunc("/documents/", cors(auth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
