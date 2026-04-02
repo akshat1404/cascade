@@ -1,6 +1,7 @@
 # Collaborent
 
 > A collaborative document editor — built with SvelteKit, Go, Supabase, and MongoDB.
+> Access at https://collaborent.vercel.app
 
 ---
 
