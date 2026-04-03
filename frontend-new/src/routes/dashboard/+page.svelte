@@ -59,7 +59,7 @@
         showModal = false;
     }
 
-    async function handleCreate(title: string) {
+    async function handleCreate(title: string, content?: string) {
         if (!title) {
             alert("Title is required");
             return;
@@ -84,6 +84,22 @@
         }
 
         const doc = await res.json();
+
+        // if content is provided from import, we save it immediately
+        if (content) {
+            await fetch(`${import.meta.env.VITE_API_URL}/documents/${doc.id}`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${session?.access_token}`,
+                },
+                body: JSON.stringify({
+                    title,
+                    content,
+                }),
+            });
+        }
+
         showModal = false;
         window.location.href = `/document/${doc.id}`;
     }
