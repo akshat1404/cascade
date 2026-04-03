@@ -158,7 +158,78 @@
 		currentColor = color;
 		editor?.chain().focus().setColor(color).run();
 	}
+
+	let showExportMenu = $state(false);
+
+	function toggleExportMenu() {
+		showExportMenu = !showExportMenu;
+	}
+
+	function saveAsPDF() {
+		showExportMenu = false;
+		const html = editor?.getHTML() || "";
+		const printWindow = window.open("", "_blank");
+		if (printWindow) {
+			printWindow.document.write(`
+				<html>
+				<head>
+					<title>${title || 'Document'}</title>
+					<style>
+						body { font-family: 'Inter', sans-serif; padding: 40px; color: #1a0a12; line-height: 1.75; }
+						h1 { font-size: 2em; margin-bottom: 0.5em; }
+						h2 { font-size: 1.5em; margin-bottom: 0.5em; }
+						p { margin-bottom: 1em; }
+						ul, ol { margin-bottom: 1em; padding-left: 20px; }
+						blockquote { border-left: 3px solid #a855f7; padding-left: 15px; color: #555; }
+						pre { background: #f4f4f4; padding: 15px; border-radius: 5px; }
+						.document-title { font-size: 2.5em; font-weight: bold; margin-bottom: 1em; text-align: center; }
+					</style>
+				</head>
+				<body>
+					<div class="document-title">${title || 'Untitled Document'}</div>
+					${html}
+				</body>
+				</html>
+			`);
+			printWindow.document.close();
+			printWindow.focus();
+			setTimeout(() => {
+				printWindow.print();
+				printWindow.close();
+			}, 250);
+		}
+	}
+
+	function saveAsWord() {
+		showExportMenu = false;
+		const html = editor?.getHTML() || "";
+		const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>" + (title || 'Document') + "</title></head><body>";
+		const footer = "</body></html>";
+		const sourceHTML = header + `<h1 style="text-align: center;">${title || 'Untitled Document'}</h1>` + html + footer;
+
+		const blob = new Blob(['\ufeff', sourceHTML], {
+			type: 'application/msword'
+		});
+
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = (title || 'document') + '.doc';
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+		URL.revokeObjectURL(url);
+	}
+
+	// Close export menu if clicked outside
+	function handleOutsideClick(e: MouseEvent) {
+		if (showExportMenu && !(e.target as Element).closest('.export-container')) {
+			showExportMenu = false;
+		}
+	}
 </script>
+
+<svelte:window on:click={handleOutsideClick} />
 
 <svelte:head>
 	<title>{title || "Untitled"} — Collaborent</title>
@@ -378,13 +449,32 @@
 				oninput={scheduleSave}
 				placeholder="Untitled Document"
 			/>
-			<span
-				class="save-status"
-				class:saving={saveStatus === "Saving..."}
-				class:unsaved={saveStatus === "Unsaved"}
-			>
-				{saveStatus}
-			</span>
+			
+			<div class="header-actions">
+				<span
+					class="save-status"
+					class:saving={saveStatus === "Saving..."}
+					class:unsaved={saveStatus === "Unsaved"}
+				>
+					{saveStatus}
+				</span>
+
+				<div class="export-container">
+					<button class="export-btn" onclick={toggleExportMenu}>
+						Export ▾
+					</button>
+					{#if showExportMenu}
+						<div class="export-dropdown">
+							<button class="export-option" onclick={saveAsPDF}>
+								Save as PDF
+							</button>
+							<button class="export-option" onclick={saveAsWord}>
+								Save as Word
+							</button>
+						</div>
+					{/if}
+				</div>
+			</div>
 		</header>
 
 		<div class="editor-wrapper" data-cursor-text>
@@ -728,6 +818,67 @@
 	}
 	.save-status.unsaved {
 		color: #f472b4;
+	}
+
+	/* ── Export Dropdown ─────────────────────────── */
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 20px;
+	}
+
+	.export-container {
+		position: relative;
+	}
+
+	.export-btn {
+		padding: 8px 16px;
+		font-size: 13px;
+		font-weight: 600;
+		border: 1px solid #e2d9ee;
+		border-radius: 8px;
+		background: #fff;
+		color: #3d2a50;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.export-btn:hover {
+		background: #f3e8ff;
+		border-color: #a855f7;
+		color: #a855f7;
+	}
+
+	.export-dropdown {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		width: 140px;
+		background: #ffffff;
+		border: 1px solid #e2d9ee;
+		border-radius: 8px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+		display: flex;
+		flex-direction: column;
+		padding: 6px;
+		z-index: 50;
+	}
+
+	.export-option {
+		padding: 8px 12px;
+		font-size: 13px;
+		font-family: "Inter", sans-serif;
+		font-weight: 500;
+		color: #1a0a12;
+		background: transparent;
+		border: none;
+		border-radius: 6px;
+		text-align: left;
+		cursor: pointer;
+		transition: background 0.1s, color 0.1s;
+	}
+	.export-option:hover {
+		background: #f3e8ff;
+		color: #a855f7;
 	}
 
 	/* ── Editor area ─────────────────────────────── */
