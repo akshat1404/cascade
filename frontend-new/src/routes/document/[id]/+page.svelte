@@ -9,6 +9,11 @@
 	import { Highlight } from "@tiptap/extension-highlight";
 	import { TextAlign } from "@tiptap/extension-text-align";
 	import { Underline } from "@tiptap/extension-underline";
+	import { Table } from "@tiptap/extension-table";
+	import { TableRow } from "@tiptap/extension-table-row";
+	import { TableCell } from "@tiptap/extension-table-cell";
+	import { TableHeader } from "@tiptap/extension-table-header";
+	import { marked } from "marked";
 	import { supabase } from "$lib/supabase";
 
 	let { data } = $props();
@@ -133,6 +138,10 @@
 				Color,
 				Highlight.configure({ multicolor: true }),
 				TextAlign.configure({ types: ["heading", "paragraph"] }),
+				Table.configure({ resizable: false }),
+				TableRow,
+				TableCell,
+				TableHeader,
 			],
 			content: data.document.content ?? "",
 			onTransaction({ editor: e }) {
@@ -261,11 +270,13 @@
 
 			const { result } = await res.json();
 			if (result) {
+				// Convert markdown to HTML so TipTap renders tables, bold, etc.
+				const html = marked.parse(result) as string;
 				editor
 					.chain()
 					.focus()
 					.deleteSelection()
-					.insertContent(result)
+					.insertContent(html)
 					.run();
 			}
 		} catch (err) {
@@ -1251,4 +1262,40 @@
 		from { transform: rotate(0deg); }
 		to   { transform: rotate(360deg); }
 	}
+
+	/* ── Table styles (for AI-generated tables) ─── */
+	:global(.ProseMirror table) {
+		border-collapse: collapse;
+		width: 100%;
+		margin: 1em 0;
+		font-size: 14px;
+		overflow: hidden;
+		border-radius: 8px;
+		border: 1px solid #e2d9ee;
+	}
+	:global(.ProseMirror th) {
+		background: linear-gradient(135deg, #f3e8ff 0%, #fce7f3 100%);
+		color: #3d2a50;
+		font-weight: 600;
+		padding: 10px 14px;
+		text-align: left;
+		border: 1px solid #e2d9ee;
+		font-size: 12px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	:global(.ProseMirror td) {
+		padding: 9px 14px;
+		border: 1px solid #ede8f0;
+		color: #1a0a12;
+		vertical-align: top;
+		line-height: 1.5;
+	}
+	:global(.ProseMirror tr:nth-child(even) td) {
+		background: #faf8fc;
+	}
+	:global(.ProseMirror tr:hover td) {
+		background: #f3e8ff55;
+	}
 </style>
+
