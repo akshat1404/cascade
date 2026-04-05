@@ -47,6 +47,7 @@ func main() {
 
 	authHandler := handlers.NewAuthHandler(db.Collection("users"), jwks)
 	documentHandler := handlers.NewDocumentHandler(db.Collection("documents"))
+	aiHandler := handlers.NewAIHandler()
 
 	cors := middleware.CORS
 	auth := middleware.Auth(jwks)
@@ -76,6 +77,7 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})))
+	http.HandleFunc("/ai/process", cors(auth(aiHandler.Process)))
 
 	log.Println("Backend running on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))

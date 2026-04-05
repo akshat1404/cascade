@@ -52,6 +52,9 @@
 	let bubbleY = $state(0);
 	let bubbleInner = $state<HTMLDivElement | null>(null);
 
+	// AI bubble state
+	let aiLoading = $state<string | null>(null); // which action is loading
+
 	function updateBubble(e: Editor) {
 		const { from, to } = e.state.selection;
 		if (from === to) {
@@ -225,6 +228,51 @@
 	function handleOutsideClick(e: MouseEvent) {
 		if (showExportMenu && !(e.target as Element).closest('.export-container')) {
 			showExportMenu = false;
+		}
+	}
+	async function runAI(action: string) {
+		if (!editor || aiLoading) return;
+
+		const { from, to } = editor.state.selection;
+		if (from === to) return;
+
+		const selectedText = editor.state.doc.textBetween(from, to, " ");
+		if (!selectedText.trim()) return;
+
+		aiLoading = action;
+		try {
+			const {
+				data: { session },
+			} = await supabase.auth.getSession();
+
+			const res = await fetch(`${import.meta.env.VITE_API_URL}/ai/process`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${session?.access_token}`,
+				},
+				body: JSON.stringify({ text: selectedText, action }),
+			});
+
+			if (!res.ok) {
+				console.error("AI request failed:", await res.text());
+				return;
+			}
+
+			const { result } = await res.json();
+			if (result) {
+				editor
+					.chain()
+					.focus()
+					.deleteSelection()
+					.insertContent(result)
+					.run();
+			}
+		} catch (err) {
+			console.error("AI error:", err);
+		} finally {
+			aiLoading = null;
+			showBubble = false;
 		}
 	}
 </script>
@@ -599,6 +647,65 @@
 					editor?.chain().focus().toggleOrderedList().run()}
 				title="Ordered list">1. —</button
 			>
+
+			<div class="bb-divider"></div>
+
+			<!-- ── AI Actions ── -->
+			<button
+				class="bb ai-btn"
+				class:ai-loading={aiLoading === 'fix grammar'}
+				disabled={!!aiLoading}
+				onclick={() => runAI('fix grammar')}
+				title="Fix grammar"
+			>
+				{#if aiLoading === 'fix grammar'}
+					<span class="ai-spin">⟳</span>
+				{:else}
+					✦ Fix
+				{/if}
+			</button>
+
+			<button
+				class="bb ai-btn"
+				class:ai-loading={aiLoading === 'translate to French'}
+				disabled={!!aiLoading}
+				onclick={() => runAI('translate to French')}
+				title="Translate to French"
+			>
+				{#if aiLoading === 'translate to French'}
+					<span class="ai-spin">⟳</span>
+				{:else}
+					✦ FR
+				{/if}
+			</button>
+
+			<button
+				class="bb ai-btn"
+				class:ai-loading={aiLoading === 'make a table'}
+				disabled={!!aiLoading}
+				onclick={() => runAI('make a table')}
+				title="Make a table"
+			>
+				{#if aiLoading === 'make a table'}
+					<span class="ai-spin">⟳</span>
+				{:else}
+					✦ ⊞
+				{/if}
+			</button>
+
+			<button
+				class="bb ai-btn"
+				class:ai-loading={aiLoading === 'summarise'}
+				disabled={!!aiLoading}
+				onclick={() => runAI('summarise')}
+				title="Summarise"
+			>
+				{#if aiLoading === 'summarise'}
+					<span class="ai-spin">⟳</span>
+				{:else}
+					✦ ∑
+				{/if}
+			</button>
 		</div>
 
 		<button
@@ -1017,7 +1124,7 @@
 		align-items: center;
 		gap: 2px;
 		overflow-x: auto;
-		max-width: 260px;
+		max-width: 420px;
 		scrollbar-width: none;
 	}
 	:global(.bubble-inner::-webkit-scrollbar) {
@@ -1097,5 +1204,51 @@
 			opacity: 1;
 			transform: translate(-50%, calc(-100% - 6px)) scale(1);
 		}
+	}
+
+	/* ── AI action buttons ─────────────────────── */
+	:global(.ai-btn) {
+		min-width: 38px;
+		padding: 0 9px;
+		background: linear-gradient(135deg, rgba(168, 85, 247, 0.18) 0%, rgba(244, 114, 182, 0.12) 100%);
+		color: #e879f9;
+		border: 1px solid rgba(168, 85, 247, 0.3);
+		border-radius: 7px;
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.02em;
+		white-space: nowrap;
+		transition:
+			background 0.15s,
+			color 0.15s,
+			box-shadow 0.15s,
+			opacity 0.15s;
+	}
+	:global(.ai-btn:hover:not(:disabled)) {
+		background: linear-gradient(135deg, rgba(168, 85, 247, 0.35) 0%, rgba(244, 114, 182, 0.25) 100%);
+		color: #fff;
+		box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+		border-color: rgba(168, 85, 247, 0.6);
+	}
+	:global(.ai-btn:disabled) {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+	:global(.ai-btn.ai-loading) {
+		background: linear-gradient(135deg, #a855f7 0%, #f472b4 100%);
+		color: #fff;
+		opacity: 1;
+	}
+
+	/* Spin animation for loading indicator */
+	:global(.ai-spin) {
+		display: inline-block;
+		animation: aiSpin 0.8s linear infinite;
+		font-size: 15px;
+		line-height: 1;
+	}
+	@keyframes aiSpin {
+		from { transform: rotate(0deg); }
+		to   { transform: rotate(360deg); }
 	}
 </style>
