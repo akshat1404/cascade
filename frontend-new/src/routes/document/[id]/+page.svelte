@@ -367,7 +367,7 @@
 <svelte:window on:click={handleOutsideClick} />
 
 <svelte:head>
-	<title>{title || "Untitled"} — Collaborent</title>
+	<title>{title || "Untitled"} — Cascade</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link
 		rel="preconnect"

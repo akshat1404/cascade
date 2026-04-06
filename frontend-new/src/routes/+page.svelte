@@ -83,12 +83,12 @@
 </script>
 
 <main>
-    <h1>Collaborent</h1>
+    <h1>Cascade</h1>
 
     {#if loading}
         <p>Loading...</p>
     {:else if !session}
-        <button on:click={signIn}>Continue with Google</button>
+        <button onclick={signIn}>Continue with Google</button>
     {/if}
 </main>
 

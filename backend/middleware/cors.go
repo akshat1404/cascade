@@ -6,7 +6,7 @@ func CORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:5173" || origin == "https://collaborent.vercel.app" {
+		if origin == "http://localhost:5173" || origin == "https://cascade-frontend.vercel.app" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 

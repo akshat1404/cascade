@@ -254,7 +254,7 @@
 		animation: button-sphere-breathe 2.4s ease-in-out infinite !important;
 	}
 
-	/* Collaborent title and any data-cursor-glow element — pill-shaped glow */
+	/* Cascade title and any data-cursor-glow element — pill-shaped glow */
 	:global([data-cursor-glow]:hover) {
 		border-radius: 999px !important;
 		padding: 4px 12px !important;

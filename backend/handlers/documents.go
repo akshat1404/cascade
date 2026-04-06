@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/akshat1404/collaborent/backend/middleware"
-	"github.com/akshat1404/collaborent/backend/models"
+	"github.com/akshat1404/cascade/backend/middleware"
+	"github.com/akshat1404/cascade/backend/models"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"

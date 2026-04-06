@@ -8,7 +8,7 @@
 </script>
 
 <nav class="navbar">
-    <span class="navbar-brand">Collaborent</span>
+    <span class="navbar-brand">Cascade</span>
     <div class="navbar-actions">
         <button class="btn-create" id="create-doc-btn" onclick={onCreateDoc}>
             <span class="btn-icon">+</span> Create

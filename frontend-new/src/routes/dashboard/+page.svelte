@@ -136,7 +136,7 @@
 </script>
 
 <svelte:head>
-    <title>Collaborent — Dashboard</title>
+    <title>Cascade — Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link
         rel="preconnect"

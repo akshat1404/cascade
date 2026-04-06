@@ -1,4 +1,4 @@
-# Collaborent — Project Context
+# Cascade — Project Context
 
 ## Stack
 - Frontend: SvelteKit with Svelte 5 (use $state, $derived runes — NOT writable stores)

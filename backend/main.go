@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
-	"github.com/akshat1404/collaborent/backend/handlers"
-	"github.com/akshat1404/collaborent/backend/middleware"
+	"github.com/akshat1404/cascade/backend/handlers"
+	"github.com/akshat1404/cascade/backend/middleware"
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"

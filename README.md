@@ -1,13 +1,13 @@
-# Collaborent
+# Cascade
 
 > A collaborative document editor — built with SvelteKit, Go, Supabase, and MongoDB.
-> Access at https://collaborent.vercel.app
+> Access Link
 
 ---
 
 ## Overview
 
-Collaborent is a real-time collaborative document editing platform. Users authenticate securely via Google OAuth (powered by Supabase), and their sessions are validated server-side by a Go backend before any data is persisted to MongoDB.
+Cascade is a real-time collaborative document editing platform. Users authenticate securely via Google OAuth (powered by Supabase), and their sessions are validated server-side by a Go backend before any data is persisted to MongoDB.
 
 The project is intentionally kept full-stack and minimal at its core — authentication and user management are rock-solid before document features are layered on top.
 
@@ -48,7 +48,7 @@ The project is intentionally kept full-stack and minimal at its core — authent
 ## Project Structure
 
 ```
-collaborent/
+cascade/
 ├── backend/
 │   ├── main.go          # Go HTTP server — auth callback, health check
 │   ├── go.mod
@@ -110,7 +110,7 @@ go run main.go
 ```env
 SUPABASE_URL=https://<your-project>.supabase.co
 MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/
-MONGODB_DB=collaborent
+MONGODB_DB=cascade
 ```
 
 ---
