@@ -48,6 +48,8 @@ func main() {
 	authHandler := handlers.NewAuthHandler(db.Collection("users"), jwks)
 	documentHandler := handlers.NewDocumentHandler(db.Collection("documents"))
 	aiHandler := handlers.NewAIHandler()
+	settingsHandler := handlers.NewSettingsHandler(db.Collection("users"))
+	linkedInHandler := handlers.NewLinkedInHandler(db.Collection("users"))
 
 	cors := middleware.CORS
 	auth := middleware.Auth(jwks)
@@ -57,8 +59,9 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}))
 	http.HandleFunc("/auth/callback", cors(authHandler.Callback))
+
+	// ── Document routes ─────────────────────────────────────────────────────
 	http.HandleFunc("/documents/create", cors(auth(documentHandler.Create)))
-	// Exact: GET /documents → list documents for current user
 	http.HandleFunc("/documents", cors(auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -66,7 +69,6 @@ func main() {
 		}
 		documentHandler.ListByUser(w, r)
 	})))
-	// Prefix: /documents/{id} → GET by ID, PUT to update, DELETE to delete
 	http.HandleFunc("/documents/", cors(auth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -79,7 +81,25 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})))
+
+	// ── AI route ─────────────────────────────────────────────────────────────
 	http.HandleFunc("/ai/process", cors(auth(aiHandler.Process)))
+
+	// ── Settings routes ───────────────────────────────────────────────────────
+	http.HandleFunc("/settings/connected-accounts", cors(auth(settingsHandler.GetConnectedAccounts)))
+
+	// Dev.to
+	http.HandleFunc("/settings/devto/connect", cors(auth(settingsHandler.ConnectDevTo)))
+	http.HandleFunc("/settings/devto/disconnect", cors(auth(settingsHandler.DisconnectDevTo)))
+
+	// Medium
+	http.HandleFunc("/settings/medium/connect", cors(auth(settingsHandler.ConnectMedium)))
+	http.HandleFunc("/settings/medium/disconnect", cors(auth(settingsHandler.DisconnectMedium)))
+
+	// LinkedIn (disconnect needs auth; initiate + callback are browser redirects)
+	http.HandleFunc("/settings/linkedin/disconnect", cors(auth(settingsHandler.DisconnectLinkedIn)))
+	http.HandleFunc("/auth/linkedin", cors(linkedInHandler.Initiate))
+	http.HandleFunc("/auth/linkedin/callback", cors(linkedInHandler.Callback))
 
 	log.Println("Backend running on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
