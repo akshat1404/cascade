@@ -14,9 +14,31 @@
 	import { TableCell } from "@tiptap/extension-table-cell";
 	import { TableHeader } from "@tiptap/extension-table-header";
 	import { Image } from "@tiptap/extension-image";
+	import { NodeSelection } from "@tiptap/pm/state";
 	import { marked } from "marked";
 	import { supabase } from "$lib/supabase";
 	import imageCompression from "browser-image-compression";
+
+	// ── Custom Image extension with style + width attributes ──────
+	const CustomImage = Image.extend({
+		addAttributes() {
+			return {
+				...this.parent?.(),
+				width: {
+					default: null,
+					parseHTML: (el: HTMLElement) => el.getAttribute('width'),
+					renderHTML: (attrs: Record<string, unknown>) =>
+						attrs.width ? { width: attrs.width as string } : {},
+				},
+				style: {
+					default: null,
+					parseHTML: (el: HTMLElement) => el.getAttribute('style'),
+					renderHTML: (attrs: Record<string, unknown>) =>
+						attrs.style ? { style: attrs.style as string } : {},
+				},
+			};
+		},
+	});
 
 	let { data } = $props();
 
@@ -65,42 +87,182 @@
 	let savedSelection = $state<{ from: number; to: number } | null>(null); // locked selection
 	let showAskModal = $state(false);                       // Ask AI modal visibility
 
-	// ── Image upload state ────────────────────────
+	// ── Image upload state ─────────────────────────────────────
 	let imageFileInput = $state<HTMLInputElement | null>(null);
 	let imageUploading = $state(false);
 	let imageUploadError = $state<string | null>(null);
 	let imageUploadToast = $state<"idle" | "compressing" | "uploading" | "done" | "error">("idle");
 
+	// ── Image selection + editing state ────────────────────────
+	let isImageSelected = $state(false);
+	let selectedImgAlt = $state("");
+	let imgReplaceInput = $state<HTMLInputElement | null>(null);
+
+	// Filter / style sliders (populated from selected image attrs)
+	let imgWidthPct   = $state(100);   // 10–100 %
+	let imgBrightness = $state(100);   // 10–200 %
+	let imgContrast   = $state(100);   // 10–200 %
+	let imgSaturation = $state(100);   // 0–200  %
+	let imgBlur       = $state(0);     // 0–20   px
+	let imgGrayscale  = $state(0);     // 0–100  %
+	let imgSepia      = $state(0);     // 0–100  %
+	let imgOpacity    = $state(100);   // 10–100 %
+	let imgRadius     = $state(0);     // 0–50   px
+	let imgRotate     = $state(0);     // -180–180 deg
+	// Positional translate (drag)
+	let imgTX = $state(0);  // translate X px
+	let imgTY = $state(0);  // translate Y px
+
+	// Drag tracking (non-reactive, no $state needed)
+	let _dragging = false;
+	let _dragSX = 0, _dragSY = 0;  // mouse start
+	let _dragSTX = 0, _dragSTY = 0; // translate start
+
+	// ── Parse/build image style ────────────────────────────────
+	function parseImageStyle(style: string) {
+		const num = (re: RegExp, def: number) => { const m = style.match(re); return m ? parseFloat(m[1]) : def; };
+		imgBrightness = num(/brightness\((\d+(?:\.\d+)?)%\)/, 100);
+		imgContrast   = num(/contrast\((\d+(?:\.\d+)?)%\)/, 100);
+		imgSaturation = num(/saturate\((\d+(?:\.\d+)?)%\)/, 100);
+		imgBlur       = num(/blur\((\d+(?:\.\d+)?)px\)/, 0);
+		imgGrayscale  = num(/grayscale\((\d+(?:\.\d+)?)%\)/, 0);
+		imgSepia      = num(/sepia\((\d+(?:\.\d+)?)%\)/, 0);
+		imgOpacity    = num(/opacity:\s*(\d+(?:\.\d+)?)%/, 100);
+		imgRadius     = num(/border-radius:\s*(\d+(?:\.\d+)?)px/, 0);
+		imgRotate     = num(/rotate\((-?\d+(?:\.\d+)?)deg\)/, 0);
+		const txm = style.match(/translateX\((-?\d+(?:\.\d+)?)px\)/);
+		const tym = style.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+		imgTX = txm ? parseFloat(txm[1]) : 0;
+		imgTY = tym ? parseFloat(tym[1]) : 0;
+		const wm = style.match(/width:\s*(\d+(?:\.\d+)?)%/);
+		imgWidthPct = wm ? parseFloat(wm[1]) : 100;
+	}
+
+	function buildImageStyle(): string {
+		const f = `brightness(${imgBrightness}%) contrast(${imgContrast}%) saturate(${imgSaturation}%) blur(${imgBlur}px) grayscale(${imgGrayscale}%) sepia(${imgSepia}%)`;
+		return [
+			`width: ${imgWidthPct}%`,
+			`filter: ${f}`,
+			`opacity: ${imgOpacity}%`,
+			`border-radius: ${imgRadius}px`,
+			`transform: translateX(${imgTX}px) translateY(${imgTY}px) rotate(${imgRotate}deg)`,
+			`display: block`,
+		].join('; ');
+	}
+
+	// Helper: get the currently-selected image DOM element
+	function getSelectedImgEl(): HTMLImageElement | null {
+		if (!editor) return null;
+		const { selection } = editor.state;
+		if (!(selection instanceof NodeSelection) || selection.node.type.name !== 'image') return null;
+		const dom = editor.view.nodeDOM(selection.from) as HTMLElement | null;
+		if (!dom) return null;
+		return (dom.tagName === 'IMG' ? dom : dom.querySelector('img')) as HTMLImageElement | null;
+	}
+
+	function applyImageStyle() {
+		if (!editor) return;
+		const style = buildImageStyle();
+		// 1. Apply immediately to DOM for instant visual feedback
+		const imgEl = getSelectedImgEl();
+		if (imgEl) imgEl.setAttribute('style', style);
+		// 2. Commit to ProseMirror state so it saves
+		editor.chain().updateAttributes('image', { style }).run();
+	}
+
 	function updateBubble(e: Editor) {
-		const { from, to } = e.state.selection;
+		const { selection } = e.state;
+
+		// ── Image node? Use proper NodeSelection instanceof check
+		if (selection instanceof NodeSelection && selection.node.type.name === 'image') {
+			const node = selection.node;
+			selectedImgAlt = node.attrs.alt ?? '';
+			parseImageStyle(node.attrs.style ?? '');
+			isImageSelected = true;
+			showBubble = false;
+			if (!showAskModal) savedSelection = null;
+			return;
+		}
+
+		// ── Not an image — reset
+		isImageSelected = false;
+
+		// ── Normal text selection
+		const { from, to } = selection;
 		if (from === to) {
 			showBubble = false;
 			if (!showAskModal) savedSelection = null;
 			return;
 		}
 		const sel = window.getSelection();
-		if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-			showBubble = false;
-			savedSelection = null;
-			return;
-		}
+		if (!sel || sel.rangeCount === 0 || sel.isCollapsed) { showBubble = false; savedSelection = null; return; }
 		const rect = sel.getRangeAt(0).getBoundingClientRect();
-		if (!rect.width) {
-			showBubble = false;
-			savedSelection = null;
-			return;
-		}
-		// Clamp X so bubble never clips the viewport edges
-		const halfW = 160; // approx half of bubble width
-		bubbleX = Math.min(
-			Math.max(rect.left + rect.width / 2, halfW),
-			window.innerWidth - halfW,
-		);
-		bubbleY = rect.top - 10; // 10px gap above selection
-		// Save the current selection so AI actions can use it even after
-		// the editor loses focus (e.g. when the Ask AI input is focused).
+		if (!rect.width) { showBubble = false; savedSelection = null; return; }
+		const halfW = 160;
+		bubbleX = Math.min(Math.max(rect.left + rect.width / 2, halfW), window.innerWidth - halfW);
+		bubbleY = rect.top - 10;
 		savedSelection = { from, to };
 		showBubble = true;
+		
+	}
+
+	// ── Drag-to-position ────────────────────────────────────────
+	function onEditorMouseDown(e: MouseEvent) {
+		const target = e.target as HTMLElement;
+		// Only drag if target is an image that is already ProseMirror-selected
+		// (the selection class is set on the *first* click; drag starts on the *second* hold)
+		if (target.tagName !== 'IMG') return;
+		if (!target.classList.contains('ProseMirror-selectednode')) return;
+		e.preventDefault();
+		_dragging = true;
+		_dragSX = e.clientX; _dragSY = e.clientY;
+		_dragSTX = imgTX;    _dragSTY = imgTY;
+		window.addEventListener('mousemove', onWindowMouseMove);
+		window.addEventListener('mouseup',   onWindowMouseUp);
+	}
+	function onWindowMouseMove(e: MouseEvent) {
+		if (!_dragging) return;
+		imgTX = _dragSTX + (e.clientX - _dragSX);
+		imgTY = _dragSTY + (e.clientY - _dragSY);
+		// Live-update style without going through ProseMirror (for smooth drag)
+		if (!editor) return;
+		const { selection } = editor.state;
+		if (!(selection instanceof NodeSelection)) return;
+		const domEl = editor.view.nodeDOM(selection.from) as HTMLElement | null;
+		const img = domEl?.tagName === 'IMG' ? domEl : domEl?.querySelector('img');
+		if (img) (img as HTMLElement).style.transform =
+			`translateX(${imgTX}px) translateY(${imgTY}px) rotate(${imgRotate}deg)`;
+	}
+	function onWindowMouseUp() {
+		if (!_dragging) return;
+		_dragging = false;
+		window.removeEventListener('mousemove', onWindowMouseMove);
+		window.removeEventListener('mouseup',   onWindowMouseUp);
+		applyImageStyle(); // commit to ProseMirror
+	}
+
+	// ── Image actions ───────────────────────────────────────────
+	function getImgPos(): number | null {
+		if (!editor) return null;
+		const sel = editor.state.selection;
+		if (!(sel instanceof NodeSelection) || sel.node.type.name !== 'image') return null;
+		return sel.from;
+	}
+	function deleteImage() {
+		if (getImgPos() === null || !editor) return;
+		editor.chain().focus().deleteSelection().run();
+		isImageSelected = false;
+	}
+	function setImagePosition(float: 'left' | 'right' | 'center' | 'block') {
+		if (!editor) return;
+		if (float === 'center') {
+			editor.chain().focus().updateAttributes('image', { style: buildImageStyle().replace(/display:[^;]+/, 'display:block; margin:0 auto') }).run();
+		} else if (float === 'block') {
+			applyImageStyle();
+		} else {
+			const margin = float === 'left' ? '0 1.5em 1em 0' : '0 0 1em 1.5em';
+			editor.chain().focus().updateAttributes('image', { style: buildImageStyle() + `; float: ${float}; margin: ${margin}` }).run();
+		}
 	}
 
 	const fontSizes = [
@@ -159,7 +321,7 @@
 				TableRow,
 				TableCell,
 				TableHeader,
-				Image.configure({ inline: false, allowBase64: false }),
+				CustomImage.configure({ inline: false, allowBase64: false }),
 			],
 			content: data.document.content ?? "",
 			onTransaction({ editor: e }) {
@@ -194,6 +356,7 @@
 	function toggleExportMenu() {
 		showExportMenu = !showExportMenu;
 	}
+
 
 	function saveAsPDF() {
 		showExportMenu = false;
@@ -258,70 +421,8 @@
 		}
 	}
 
-	// ── Image upload ──────────────────────────────
-	function triggerImageUpload() {
-		imageFileInput?.click();
-	}
-
-	async function handleImageFile(e: Event) {
-		const input = e.target as HTMLInputElement;
-		const file = input.files?.[0];
-		input.value = ""; // reset so the same file can be picked again
-		if (!file) return;
-
-		imageUploading = true;
-		imageUploadError = null;
-		imageUploadToast = "compressing";
-
-		try {
-			// 1. Compress client-side
-			const compressed = await imageCompression(file, {
-				maxSizeMB: 1,
-				maxWidthOrHeight: 1200,
-				useWebWorker: true,
-				fileType: file.type,
-			});
-
-			imageUploadToast = "uploading";
-
-			// 2. Build a unique path inside the bucket
-			const ext = compressed.name.split(".").pop() ?? "jpg";
-			const filename = `doc-images/${docId}/${Date.now()}.${ext}`;
-
-			// 3. Upload to Supabase Storage
-			const { error: uploadErr } = await supabase.storage
-				.from("cascade-images")
-				.upload(filename, compressed, {
-					cacheControl: "3600",
-					upsert: false,
-					contentType: compressed.type,
-				});
-
-			if (uploadErr) throw uploadErr;
-
-			// 4. Get the public URL
-			const { data: urlData } = supabase.storage
-				.from("cascade-images")
-				.getPublicUrl(filename);
-
-			const publicUrl = urlData.publicUrl;
-			if (!publicUrl) throw new Error("Failed to get public URL");
-
-			// 5. Insert into TipTap
-			editor?.chain().focus().setImage({ src: publicUrl, alt: file.name }).run();
-
-			imageUploadToast = "done";
-			setTimeout(() => { imageUploadToast = "idle"; }, 2500);
-		} catch (err: unknown) {
-			console.error("Image upload error:", err);
-			imageUploadError = err instanceof Error ? err.message : "Upload failed";
-			imageUploadToast = "error";
-			setTimeout(() => { imageUploadToast = "idle"; imageUploadError = null; }, 4000);
-		} finally {
-			imageUploading = false;
-		}
-	}
 	async function runAI(action: string) {
+
 		if (!editor || aiLoading) return;
 
 		// Use the saved selection (in case editor lost focus)
@@ -435,7 +536,66 @@
 		showBubble = false;
 		showAskModal = true;
 	}
+
+	// ── Image upload helpers ──────────────────────────────────────
+	function triggerImageUpload() { imageFileInput?.click(); }
+
+	async function uploadCompressedImage(file: File): Promise<string> {
+		const compressed = await imageCompression(file, {
+			maxSizeMB: 1, maxWidthOrHeight: 1200, useWebWorker: true, fileType: file.type,
+		});
+		const ext = compressed.name.split('.').pop() ?? 'jpg';
+		const filename = `doc-images/${docId}/${Date.now()}.${ext}`;
+		const { error: uploadErr } = await supabase.storage.from('cascade-images')
+			.upload(filename, compressed, { cacheControl: '3600', upsert: false, contentType: compressed.type });
+		if (uploadErr) throw uploadErr;
+		const { data: urlData } = supabase.storage.from('cascade-images').getPublicUrl(filename);
+		if (!urlData.publicUrl) throw new Error('Failed to get public URL');
+		return urlData.publicUrl;
+	}
+
+	async function handleImageFile(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+		imageUploading = true; imageUploadError = null; imageUploadToast = 'compressing';
+		try {
+			imageUploadToast = 'uploading';
+			const publicUrl = await uploadCompressedImage(file);
+			editor?.chain().focus().setImage({ src: publicUrl, alt: file.name }).run();
+			imageUploadToast = 'done';
+			setTimeout(() => { imageUploadToast = 'idle'; }, 2500);
+		} catch (err: unknown) {
+			console.error('Image upload error:', err);
+			imageUploadError = err instanceof Error ? err.message : 'Upload failed';
+			imageUploadToast = 'error';
+			setTimeout(() => { imageUploadToast = 'idle'; imageUploadError = null; }, 4000);
+		} finally { imageUploading = false; }
+	}
+
+	async function replaceImage(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file || !editor) return;
+		if (getImgPos() === null) return;
+		imageUploading = true; imageUploadToast = 'compressing';
+		try {
+			imageUploadToast = 'uploading';
+			const publicUrl = await uploadCompressedImage(file);
+			editor.chain().updateAttributes('image', { src: publicUrl, alt: file.name }).run();
+			imageUploadToast = 'done';
+			setTimeout(() => { imageUploadToast = 'idle'; }, 2500);
+		} catch (err: unknown) {
+			console.error('Replace image error:', err);
+			imageUploadError = err instanceof Error ? err.message : 'Upload failed';
+			imageUploadToast = 'error';
+			setTimeout(() => { imageUploadToast = 'idle'; imageUploadError = null; }, 4000);
+		} finally { imageUploading = false; }
+	}
 </script>
+
 
 <svelte:window on:click={handleOutsideClick} />
 
@@ -457,6 +617,129 @@
 	<aside class="sidebar">
 		<div class="sidebar-inner">
 			<a href="/dashboard" class="back-link">← Dashboard</a>
+
+			{#if isImageSelected}
+			<!-- ━━ IMAGE EDITING PANEL ━━━━━━━━━━━━━━━━━━━━━━ -->
+			<div class="img-panel-header">
+				<span class="img-panel-title">🖼 Image</span>
+				<button class="img-panel-delete" onclick={deleteImage} title="Delete image">🗑</button>
+			</div>
+
+			<!-- Replace -->
+			<div class="toolbar-section">
+				<input type="file" accept="image/*" class="img-file-input" bind:this={imgReplaceInput} onchange={replaceImage} />
+				<button class="tool-btn img-insert-btn" disabled={imageUploading} onclick={() => imgReplaceInput?.click()}>
+					{#if imageUploading}<span class="ai-spin">⟳</span> Uploading…{:else}🔄 Replace Image{/if}
+				</button>
+			</div>
+
+			<!-- Position -->
+			<div class="toolbar-section">
+				<span class="section-label">Position</span>
+				<div class="btn-group">
+					<button class="tool-btn" onclick={() => setImagePosition('left')}   title="Float left">◧ L</button>
+					<button class="tool-btn" onclick={() => setImagePosition('center')} title="Center">⬛ C</button>
+					<button class="tool-btn" onclick={() => setImagePosition('right')}  title="Float right">◨ R</button>
+					<button class="tool-btn" onclick={() => setImagePosition('block')}  title="Block">▢ B</button>
+				</div>
+				<p class="img-hint">Drag image to reposition</p>
+			</div>
+
+			<!-- Width -->
+			<div class="toolbar-section">
+				<span class="section-label">Width — {imgWidthPct}%</span>
+				<input type="range" class="img-slider" min="10" max="100" step="5"
+					bind:value={imgWidthPct}
+					oninput={applyImageStyle}
+				/>
+				<div class="btn-group">
+					<button class="tool-btn" onclick={() => { imgWidthPct=25;  applyImageStyle(); }}>25%</button>
+					<button class="tool-btn" onclick={() => { imgWidthPct=50;  applyImageStyle(); }}>50%</button>
+					<button class="tool-btn" onclick={() => { imgWidthPct=75;  applyImageStyle(); }}>75%</button>
+					<button class="tool-btn" onclick={() => { imgWidthPct=100; applyImageStyle(); }}>100%</button>
+				</div>
+			</div>
+
+			<!-- Rotate -->
+			<div class="toolbar-section">
+				<span class="section-label">Rotate — {imgRotate}°</span>
+				<input type="range" class="img-slider" min="-180" max="180" step="1"
+					bind:value={imgRotate}
+					oninput={applyImageStyle}
+				/>
+				<button class="tool-btn" style="width:100%" onclick={() => { imgRotate=0; applyImageStyle(); }}>Reset</button>
+			</div>
+
+			<!-- Border Radius -->
+			<div class="toolbar-section">
+				<span class="section-label">Corners — {imgRadius}px</span>
+				<input type="range" class="img-slider" min="0" max="50" step="1"
+					bind:value={imgRadius}
+					oninput={applyImageStyle}
+				/>
+			</div>
+
+			<!-- Filters -->
+			<div class="toolbar-section">
+				<span class="section-label">Brightness — {imgBrightness}%</span>
+				<input type="range" class="img-slider" min="10" max="200" step="5"
+					bind:value={imgBrightness} oninput={applyImageStyle}/>
+			</div>
+			<div class="toolbar-section">
+				<span class="section-label">Contrast — {imgContrast}%</span>
+				<input type="range" class="img-slider" min="10" max="200" step="5"
+					bind:value={imgContrast} oninput={applyImageStyle}/>
+			</div>
+			<div class="toolbar-section">
+				<span class="section-label">Saturation — {imgSaturation}%</span>
+				<input type="range" class="img-slider" min="0" max="200" step="5"
+					bind:value={imgSaturation} oninput={applyImageStyle}/>
+			</div>
+			<div class="toolbar-section">
+				<span class="section-label">Blur — {imgBlur}px</span>
+				<input type="range" class="img-slider" min="0" max="20" step="0.5"
+					bind:value={imgBlur} oninput={applyImageStyle}/>
+			</div>
+			<div class="toolbar-section">
+				<span class="section-label">Opacity — {imgOpacity}%</span>
+				<input type="range" class="img-slider" min="10" max="100" step="5"
+					bind:value={imgOpacity} oninput={applyImageStyle}/>
+			</div>
+			<div class="toolbar-section">
+				<span class="section-label">Grayscale — {imgGrayscale}%</span>
+				<input type="range" class="img-slider" min="0" max="100" step="5"
+					bind:value={imgGrayscale} oninput={applyImageStyle}/>
+			</div>
+			<div class="toolbar-section">
+				<span class="section-label">Sepia — {imgSepia}%</span>
+				<input type="range" class="img-slider" min="0" max="100" step="5"
+					bind:value={imgSepia} oninput={applyImageStyle}/>
+			</div>
+
+			<!-- Quick filter presets -->
+			<div class="toolbar-section">
+				<span class="section-label">Presets</span>
+				<div class="btn-group" style="flex-wrap:wrap">
+					<button class="tool-btn" onclick={() => { imgBrightness=100;imgContrast=100;imgSaturation=100;imgBlur=0;imgGrayscale=0;imgSepia=0;imgOpacity=100; applyImageStyle(); }}>Normal</button>
+					<button class="tool-btn" onclick={() => { imgGrayscale=100;imgSepia=0; applyImageStyle(); }}>B&W</button>
+					<button class="tool-btn" onclick={() => { imgSepia=80;imgGrayscale=0; applyImageStyle(); }}>Sepia</button>
+					<button class="tool-btn" onclick={() => { imgBrightness=110;imgContrast=120;imgSaturation=130; applyImageStyle(); }}>Vivid</button>
+					<button class="tool-btn" onclick={() => { imgBrightness=90;imgContrast=90;imgSaturation=80; applyImageStyle(); }}>Muted</button>
+					<button class="tool-btn" onclick={() => { imgBlur=4; applyImageStyle(); }}>Soft</button>
+				</div>
+			</div>
+
+			<!-- Alt text -->
+			<div class="toolbar-section">
+				<span class="section-label">Alt Text</span>
+				<div style="display:flex;gap:4px">
+					<input class="select-input" style="flex:1" bind:value={selectedImgAlt} placeholder="Describe image…" />
+					<button class="tool-btn" onclick={() => { if(editor) editor.chain().focus().updateAttributes('image',{alt:selectedImgAlt}).run(); }}>✓</button>
+				</div>
+			</div>
+
+			{:else}
+			<!-- ━━ TEXT FORMATTING TOOLS ━━━━━━━━━━━━━━━━━━━━ -->
 
 			<div class="toolbar-section">
 				<span class="section-label">Format</span>
@@ -633,18 +916,11 @@
 			<div class="toolbar-section">
 				<span class="section-label">History</span>
 				<div class="btn-group">
-					<button
-						class="tool-btn"
-						onclick={() => editor?.chain().focus().undo().run()}
-						title="Undo">↩</button
-					>
-					<button
-						class="tool-btn"
-						onclick={() => editor?.chain().focus().redo().run()}
-						title="Redo">↪</button
-					>
+					<button class="tool-btn" onclick={() => editor?.chain().focus().undo().run()} title="Undo">↩</button>
+					<button class="tool-btn" onclick={() => editor?.chain().focus().redo().run()} title="Redo">↪</button>
 				</div>
 			</div>
+			{/if}
 		</div>
 	</aside>
 
@@ -707,7 +983,9 @@
 			</div>
 		</header>
 
-		<div class="editor-wrapper" data-cursor-text>
+		<div class="editor-wrapper" data-cursor-text
+			onmousedown={onEditorMouseDown}
+		>
 			<div class="editor-el" bind:this={editorEl}></div>
 		</div>
 	</main>
@@ -737,7 +1015,7 @@
 {/if}
 
 <!-- ── Floating bubble menu ── -->
-{#if showBubble && editor}
+{#if showBubble && editor && !isImageSelected}
 	<div
 		class="bubble-menu"
 		role="toolbar"
@@ -864,7 +1142,7 @@
 {/if}
 
 <!-- ── AI Bubble (separate tooltip above the format bubble) ── -->
-{#if showBubble && editor}
+{#if showBubble && editor && !isImageSelected}
 	<div
 		class="ai-bubble"
 		role="toolbar"
@@ -940,7 +1218,9 @@
 	</div>
 {/if}
 
+
 <!-- ── Ask AI Modal ── -->
+
 {#if showAskModal}
 	<div
 		class="ask-modal-overlay"
@@ -1865,6 +2145,101 @@
 	@keyframes toastSlideIn {
 		from { opacity: 0; transform: translateY(12px) scale(0.95); }
 		to   { opacity: 1; transform: translateY(0) scale(1); }
+	}
+
+	/* \u2500\u2500 Image editing sidebar panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+	.img-panel-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 6px 0 10px;
+		border-bottom: 1px solid #ede8f0;
+		margin-bottom: 4px;
+	}
+	.img-panel-title {
+		font-size: 13px;
+		font-weight: 700;
+		background: linear-gradient(135deg, #a855f7, #f472b4);
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		background-clip: text;
+	}
+	.img-panel-delete {
+		width: 28px;
+		height: 28px;
+		border: 1px solid rgba(252, 165, 165, 0.35);
+		border-radius: 7px;
+		background: rgba(252, 165, 165, 0.08);
+		color: #fca5a5;
+		font-size: 14px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.15s, border-color 0.15s;
+	}
+	.img-panel-delete:hover {
+		background: rgba(252, 165, 165, 0.2);
+		border-color: rgba(252, 165, 165, 0.6);
+	}
+
+	/* Slider track */
+	.img-slider {
+		width: 100%;
+		height: 4px;
+		-webkit-appearance: none;
+		appearance: none;
+		border-radius: 4px;
+		background: linear-gradient(to right, #a855f7, #f472b4);
+		outline: none;
+		cursor: pointer;
+		margin: 6px 0 4px;
+	}
+	.img-slider::-webkit-slider-thumb {
+		-webkit-appearance: none;
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		background: #fff;
+		border: 2px solid #a855f7;
+		box-shadow: 0 1px 4px rgba(168, 85, 247, 0.4);
+		cursor: grab;
+	}
+	.img-slider::-webkit-slider-thumb:active { cursor: grabbing; }
+	.img-slider::-moz-range-thumb {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		background: #fff;
+		border: 2px solid #a855f7;
+		cursor: grab;
+	}
+
+	.img-insert-btn {
+		width: 100%;
+		justify-content: center;
+		gap: 6px;
+		font-size: 12px;
+	}
+
+	/* Hint text under position buttons */
+	.img-hint {
+		font-size: 10px;
+		color: #b0a0bb;
+		margin-top: 4px;
+		font-style: italic;
+	}
+
+	/* Draggable cursor on selected image */
+	:global(.ProseMirror img.ProseMirror-selectednode) {
+		cursor: grab !important;
+		outline: 3px solid #a855f7;
+		outline-offset: 3px;
+		box-shadow: 0 0 0 6px rgba(168, 85, 247, 0.12);
+		border-radius: 8px;
+	}
+	:global(.ProseMirror img.ProseMirror-selectednode:active) {
+		cursor: grabbing !important;
 	}
 </style>
 
