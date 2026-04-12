@@ -13,8 +13,10 @@
 	import { TableRow } from "@tiptap/extension-table-row";
 	import { TableCell } from "@tiptap/extension-table-cell";
 	import { TableHeader } from "@tiptap/extension-table-header";
+	import { Image } from "@tiptap/extension-image";
 	import { marked } from "marked";
 	import { supabase } from "$lib/supabase";
+	import imageCompression from "browser-image-compression";
 
 	let { data } = $props();
 
@@ -62,6 +64,12 @@
 	let aiCustomPrompt = $state("");                        // free-text Ask AI prompt
 	let savedSelection = $state<{ from: number; to: number } | null>(null); // locked selection
 	let showAskModal = $state(false);                       // Ask AI modal visibility
+
+	// ── Image upload state ────────────────────────
+	let imageFileInput = $state<HTMLInputElement | null>(null);
+	let imageUploading = $state(false);
+	let imageUploadError = $state<string | null>(null);
+	let imageUploadToast = $state<"idle" | "compressing" | "uploading" | "done" | "error">("idle");
 
 	function updateBubble(e: Editor) {
 		const { from, to } = e.state.selection;
@@ -151,6 +159,7 @@
 				TableRow,
 				TableCell,
 				TableHeader,
+				Image.configure({ inline: false, allowBase64: false }),
 			],
 			content: data.document.content ?? "",
 			onTransaction({ editor: e }) {
@@ -246,6 +255,70 @@
 	function handleOutsideClick(e: MouseEvent) {
 		if (showExportMenu && !(e.target as Element).closest('.export-container')) {
 			showExportMenu = false;
+		}
+	}
+
+	// ── Image upload ──────────────────────────────
+	function triggerImageUpload() {
+		imageFileInput?.click();
+	}
+
+	async function handleImageFile(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ""; // reset so the same file can be picked again
+		if (!file) return;
+
+		imageUploading = true;
+		imageUploadError = null;
+		imageUploadToast = "compressing";
+
+		try {
+			// 1. Compress client-side
+			const compressed = await imageCompression(file, {
+				maxSizeMB: 1,
+				maxWidthOrHeight: 1200,
+				useWebWorker: true,
+				fileType: file.type,
+			});
+
+			imageUploadToast = "uploading";
+
+			// 2. Build a unique path inside the bucket
+			const ext = compressed.name.split(".").pop() ?? "jpg";
+			const filename = `doc-images/${docId}/${Date.now()}.${ext}`;
+
+			// 3. Upload to Supabase Storage
+			const { error: uploadErr } = await supabase.storage
+				.from("cascade-images")
+				.upload(filename, compressed, {
+					cacheControl: "3600",
+					upsert: false,
+					contentType: compressed.type,
+				});
+
+			if (uploadErr) throw uploadErr;
+
+			// 4. Get the public URL
+			const { data: urlData } = supabase.storage
+				.from("cascade-images")
+				.getPublicUrl(filename);
+
+			const publicUrl = urlData.publicUrl;
+			if (!publicUrl) throw new Error("Failed to get public URL");
+
+			// 5. Insert into TipTap
+			editor?.chain().focus().setImage({ src: publicUrl, alt: file.name }).run();
+
+			imageUploadToast = "done";
+			setTimeout(() => { imageUploadToast = "idle"; }, 2500);
+		} catch (err: unknown) {
+			console.error("Image upload error:", err);
+			imageUploadError = err instanceof Error ? err.message : "Upload failed";
+			imageUploadToast = "error";
+			setTimeout(() => { imageUploadToast = "idle"; imageUploadError = null; }, 4000);
+		} finally {
+			imageUploading = false;
 		}
 	}
 	async function runAI(action: string) {
@@ -572,6 +645,31 @@
 					>
 				</div>
 			</div>
+
+			<div class="toolbar-section">
+				<span class="section-label">Insert</span>
+				<!-- Hidden file input -->
+				<input
+					type="file"
+					accept="image/*"
+					class="img-file-input"
+					bind:this={imageFileInput}
+					onchange={handleImageFile}
+				/>
+				<button
+					class="tool-btn img-insert-btn"
+					class:img-uploading={imageUploading}
+					disabled={imageUploading}
+					onclick={triggerImageUpload}
+					title="Insert image"
+				>
+					{#if imageUploading}
+						<span class="ai-spin">⟳</span>
+					{:else}
+						🖼 Image
+					{/if}
+				</button>
+			</div>
 		</div>
 	</aside>
 
@@ -617,6 +715,29 @@
 		</div>
 	</main>
 </div>
+
+<!-- ── Image upload toast ── -->
+{#if imageUploadToast !== 'idle'}
+	<div
+		class="img-upload-toast"
+		class:toast-compressing={imageUploadToast === 'compressing'}
+		class:toast-uploading={imageUploadToast === 'uploading'}
+		class:toast-done={imageUploadToast === 'done'}
+		class:toast-error={imageUploadToast === 'error'}
+		role="status"
+		aria-live="polite"
+	>
+		{#if imageUploadToast === 'compressing'}
+			<span class="ai-spin">⟳</span> Compressing image…
+		{:else if imageUploadToast === 'uploading'}
+			<span class="ai-spin">⟳</span> Uploading to cloud…
+		{:else if imageUploadToast === 'done'}
+			✓ Image inserted!
+		{:else if imageUploadToast === 'error'}
+			⚠ {imageUploadError ?? 'Upload failed'}
+		{/if}
+	</div>
+{/if}
 
 <!-- ── Floating bubble menu ── -->
 {#if showBubble && editor}
@@ -1664,5 +1785,84 @@
 		box-shadow: 0 4px 14px rgba(168, 85, 247, 0.4);
 	}
 	.ask-modal-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+
+	/* ── Hidden file input ──────────────────────── */
+	.img-file-input {
+		display: none;
+	}
+
+	/* ── Insert Image button ─────────────────── */
+	.img-insert-btn {
+		width: 100%;
+		justify-content: flex-start;
+		gap: 6px;
+		font-size: 13px;
+		padding: 0 10px;
+		background: linear-gradient(135deg, rgba(168, 85, 247, 0.06) 0%, rgba(244, 114, 182, 0.04) 100%);
+		border-color: rgba(168, 85, 247, 0.35);
+		color: #7c3aed;
+		transition: all 0.15s;
+	}
+	.img-insert-btn:hover:not(:disabled) {
+		background: linear-gradient(135deg, rgba(168, 85, 247, 0.18) 0%, rgba(244, 114, 182, 0.1) 100%);
+		border-color: #a855f7;
+		color: #a855f7;
+		box-shadow: 0 2px 8px rgba(168, 85, 247, 0.2);
+	}
+	.img-uploading {
+		opacity: 0.7;
+		cursor: not-allowed;
+	}
+
+	/* ── ProseMirror image ───────────────────── */
+	:global(.ProseMirror img) {
+		max-width: 100%;
+		height: auto;
+		border-radius: 10px;
+		margin: 1em 0;
+		display: block;
+		border: 2px solid transparent;
+		transition: border-color 0.15s, box-shadow 0.15s;
+		cursor: default;
+	}
+	:global(.ProseMirror img.ProseMirror-selectednode) {
+		border-color: #a855f7;
+		box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.2);
+	}
+
+	/* ── Upload toast ──────────────────────── */
+	.img-upload-toast {
+		position: fixed;
+		bottom: 28px;
+		right: 28px;
+		z-index: 20000;
+		padding: 12px 20px;
+		border-radius: 12px;
+		font-family: "Inter", sans-serif;
+		font-size: 13px;
+		font-weight: 600;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: rgba(18, 6, 28, 0.9);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
+		border: 1px solid rgba(168, 85, 247, 0.3);
+		color: #e2ceff;
+		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+		animation: toastSlideIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	}
+	.toast-done {
+		color: #86efac;
+		border-color: rgba(134, 239, 172, 0.4);
+	}
+	.toast-error {
+		color: #fca5a5;
+		border-color: rgba(252, 165, 165, 0.4);
+	}
+	@keyframes toastSlideIn {
+		from { opacity: 0; transform: translateY(12px) scale(0.95); }
+		to   { opacity: 1; transform: translateY(0) scale(1); }
+	}
 </style>
 
