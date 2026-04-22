@@ -18,3 +18,4 @@ I document the engineering decisions and concepts behind this project on Medium.
 | 6 | [**Software Environments**](https://medium.com/gitconnected/env-112e719f58a4) |
 | 7 | [**YAML Files: The Secret Script Behind Automated Deployments**](https://medium.com/gitconnected/yaml-the-when-where-and-what-of-the-pipeline-31e9e8cdb2bf) |
 | 8 | [**Unit Testing with Jest: Protecting Your Code from Tomorrow**](https://medium.com/@akshatmtiwari/unit-testing-with-jest-protecting-your-code-from-tomorrow-d316d432fc11) |
+| 9 | [**Your Second Framework Teaches You More Than Your First**](https://medium.com/@akshatmtiwari/your-second-framework-teaches-you-more-than-your-first-da5c63f2c99f) |
