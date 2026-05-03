@@ -47,8 +47,13 @@
 	let editor = $state<Editor | null>(null);
 	let editorEl: HTMLDivElement;
 	let title = $state<string>(data.document.title ?? "");
-	let saveStatus = $state<"Saved" | "Saving..." | "Unsaved">("Saved");
+	let saveStatus = $state<"Saved" | "Saving..." | "Unsaved" | "Offline">("Saved");
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// ── Offline handling ──────────────────────────────────────
+	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
+	let hasPendingOfflineSave = $state(false);
+	const OFFLINE_STORAGE_KEY = `cascade_offline_doc_${docId}`;
 
 	let isBold = $derived(editor?.isActive("bold") ?? false);
 	let isItalic = $derived(editor?.isActive("italic") ?? false);
@@ -279,10 +284,68 @@
 	function scheduleSave() {
 		saveStatus = "Unsaved";
 		if (debounceTimer) clearTimeout(debounceTimer);
+		if (!isOnline) {
+			// Persist locally; will sync when back online
+			saveOffline();
+			return;
+		}
 		debounceTimer = setTimeout(saveDocument, 1500);
 	}
 
+	/** Persist current editor state to localStorage for offline resilience. */
+	function saveOffline() {
+		try {
+			const payload = {
+				title,
+				content: editor?.getJSON(),
+				savedAt: Date.now(),
+			};
+			localStorage.setItem(OFFLINE_STORAGE_KEY, JSON.stringify(payload));
+			hasPendingOfflineSave = true;
+			saveStatus = "Offline";
+		} catch (e) {
+			console.warn('Could not write offline save to localStorage:', e);
+		}
+	}
+
+	/** Flush the offline-buffered save to the server. Called when coming back online. */
+	async function flushOfflineSave() {
+		const raw = localStorage.getItem(OFFLINE_STORAGE_KEY);
+		if (!raw) return;
+		// Always use the most current editor state (not the stale snapshot)
+		try {
+			await saveDocument();
+			localStorage.removeItem(OFFLINE_STORAGE_KEY);
+			hasPendingOfflineSave = false;
+		} catch {
+			// Keep the offline save — we'll retry on the next 'online' event
+		}
+	}
+
+	function handleOnline() {
+		isOnline = true;
+		// Immediately sync any changes that accumulated while offline
+		if (hasPendingOfflineSave || saveStatus === "Offline" || saveStatus === "Unsaved") {
+			flushOfflineSave();
+		}
+	}
+
+	function handleOffline() {
+		isOnline = false;
+		// Cancel in-flight debounce so the fetch attempt is abandoned
+		if (debounceTimer) {
+			clearTimeout(debounceTimer);
+			debounceTimer = null;
+		}
+		// Capture whatever is currently in the editor
+		saveOffline();
+	}
+
 	async function saveDocument() {
+		if (!isOnline) {
+			saveOffline();
+			return;
+		}
 		saveStatus = "Saving...";
 		try {
 			const {
@@ -307,6 +370,21 @@
 	}
 
 	onMount(() => {
+		// Register online/offline listeners
+		window.addEventListener('online',  handleOnline);
+		window.addEventListener('offline', handleOffline);
+
+		// If we already have an offline save from a previous session, mark it
+		if (localStorage.getItem(OFFLINE_STORAGE_KEY)) {
+			hasPendingOfflineSave = true;
+			if (isOnline) {
+				// We're online — will flush once editor is ready after a short tick
+				setTimeout(flushOfflineSave, 500);
+			} else {
+				saveStatus = "Offline";
+			}
+		}
+
 		editor = new Editor({
 			element: editorEl,
 			extensions: [
@@ -338,6 +416,8 @@
 
 	onDestroy(() => {
 		if (debounceTimer) clearTimeout(debounceTimer);
+		window.removeEventListener('online',  handleOnline);
+		window.removeEventListener('offline', handleOffline);
 		editor?.destroy();
 	});
 
@@ -939,8 +1019,15 @@
 					class="save-status"
 					class:saving={saveStatus === "Saving..."}
 					class:unsaved={saveStatus === "Unsaved"}
+					class:offline={saveStatus === "Offline"}
 				>
-					{saveStatus}
+					{#if saveStatus === "Offline"}
+						<span class="offline-dot"></span> Offline
+					{:else if saveStatus === "Saving..."}
+						<span class="ai-spin">⟳</span> Saving…
+					{:else}
+						{saveStatus}
+					{/if}
 				</span>
 
 				<!-- Hidden file input lives here in the header -->
@@ -1011,6 +1098,24 @@
 		{:else if imageUploadToast === 'error'}
 			⚠ {imageUploadError ?? 'Upload failed'}
 		{/if}
+	</div>
+{/if}
+
+<!-- ── Offline banner ── -->
+{#if !isOnline}
+	<div class="offline-banner" role="alert" aria-live="assertive">
+		<span class="offline-banner-icon">📡</span>
+		<div class="offline-banner-text">
+			<strong>You're offline</strong>
+			<span>Changes are saved locally and will sync when you reconnect.</span>
+		</div>
+	</div>
+{/if}
+
+<!-- ── Back-online toast ── -->
+{#if isOnline && hasPendingOfflineSave}
+	<div class="syncing-toast" role="status" aria-live="polite">
+		<span class="ai-spin">⟳</span> Syncing offline changes…
 	</div>
 {/if}
 
@@ -1477,12 +1582,33 @@
 		color: #a0c890;
 		white-space: nowrap;
 		transition: color 0.2s;
+		display: flex;
+		align-items: center;
+		gap: 5px;
 	}
 	.save-status.saving {
 		color: #a855f7;
 	}
 	.save-status.unsaved {
 		color: #f472b4;
+	}
+	.save-status.offline {
+		color: #fb923c;
+		font-weight: 600;
+	}
+	/* Pulsing dot indicator for offline state */
+	.offline-dot {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: #fb923c;
+		animation: offlinePulse 1.4s ease-in-out infinite;
+		flex-shrink: 0;
+	}
+	@keyframes offlinePulse {
+		0%, 100% { opacity: 1;   transform: scale(1); }
+		50%       { opacity: 0.4; transform: scale(0.75); }
 	}
 
 	/* ── Export Dropdown ─────────────────────────── */
@@ -2241,5 +2367,71 @@
 	:global(.ProseMirror img.ProseMirror-selectednode:active) {
 		cursor: grabbing !important;
 	}
-</style>
 
+	/* ── Offline banner ────────────────────────────────────── */
+	.offline-banner {
+		position: fixed;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		z-index: 30000;
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		padding: 14px 28px;
+		background: linear-gradient(90deg, #431407 0%, #7c2d12 50%, #431407 100%);
+		border-top: 1px solid rgba(251, 146, 60, 0.4);
+		box-shadow: 0 -4px 24px rgba(251, 146, 60, 0.2);
+		animation: bannerSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	}
+	@keyframes bannerSlideUp {
+		from { transform: translateY(100%); opacity: 0; }
+		to   { transform: translateY(0);    opacity: 1; }
+	}
+	.offline-banner-icon {
+		font-size: 20px;
+		animation: offlinePulse 2s ease-in-out infinite;
+		flex-shrink: 0;
+	}
+	.offline-banner-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.offline-banner-text strong {
+		font-size: 13px;
+		font-weight: 700;
+		color: #fed7aa;
+		font-family: "Inter", sans-serif;
+		letter-spacing: 0.01em;
+	}
+	.offline-banner-text span {
+		font-size: 11px;
+		color: #fdba74;
+		font-family: "Inter", sans-serif;
+	}
+
+	/* ── Syncing toast (back-online) ─────────────────────── */
+	.syncing-toast {
+		position: fixed;
+		bottom: 28px;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 30001;
+		padding: 11px 22px;
+		border-radius: 12px;
+		font-family: "Inter", sans-serif;
+		font-size: 13px;
+		font-weight: 600;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: rgba(18, 6, 28, 0.9);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
+		border: 1px solid rgba(168, 85, 247, 0.4);
+		color: #e2ceff;
+		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 0 16px rgba(168, 85, 247, 0.2);
+		animation: toastSlideIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+	}
+</style>
