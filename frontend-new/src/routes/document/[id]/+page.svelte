@@ -18,6 +18,7 @@
 	import { marked } from "marked";
 	import { supabase } from "$lib/supabase";
 	import imageCompression from "browser-image-compression";
+	import { saveOfflineDoc, getOfflineDoc, deleteOfflineDoc } from "$lib/offlineDb";
 
 	// ── Custom Image extension with style + width attributes ──────
 	const CustomImage = Image.extend({
@@ -53,7 +54,6 @@
 	// ── Offline handling ──────────────────────────────────────
 	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
 	let hasPendingOfflineSave = $state(false);
-	const OFFLINE_STORAGE_KEY = `cascade_offline_doc_${docId}`;
 
 	let isBold = $derived(editor?.isActive("bold") ?? false);
 	let isItalic = $derived(editor?.isActive("italic") ?? false);
@@ -285,40 +285,35 @@
 		saveStatus = "Unsaved";
 		if (debounceTimer) clearTimeout(debounceTimer);
 		if (!isOnline) {
-			// Persist locally; will sync when back online
-			saveOffline();
+			// Persist locally (async); will sync when back online
+			void saveOffline();
 			return;
 		}
 		debounceTimer = setTimeout(saveDocument, 1500);
 	}
 
-	/** Persist current editor state to localStorage for offline resilience. */
-	function saveOffline() {
+	/** Persist current editor state to IndexedDB for offline resilience. */
+	async function saveOffline() {
 		try {
-			const payload = {
-				title,
-				content: editor?.getJSON(),
-				savedAt: Date.now(),
-			};
-			localStorage.setItem(OFFLINE_STORAGE_KEY, JSON.stringify(payload));
+			await saveOfflineDoc(docId, title, editor?.getJSON());
 			hasPendingOfflineSave = true;
 			saveStatus = "Offline";
 		} catch (e) {
-			console.warn('Could not write offline save to localStorage:', e);
+			console.warn('Could not write offline save to IndexedDB:', e);
 		}
 	}
 
 	/** Flush the offline-buffered save to the server. Called when coming back online. */
 	async function flushOfflineSave() {
-		const raw = localStorage.getItem(OFFLINE_STORAGE_KEY);
-		if (!raw) return;
+		const pending = await getOfflineDoc(docId).catch(() => undefined);
+		if (!pending) return;
 		// Always use the most current editor state (not the stale snapshot)
 		try {
 			await saveDocument();
-			localStorage.removeItem(OFFLINE_STORAGE_KEY);
+			await deleteOfflineDoc(docId);
 			hasPendingOfflineSave = false;
 		} catch {
-			// Keep the offline save — we'll retry on the next 'online' event
+			// Keep the IndexedDB record — retry on the next 'online' event
 		}
 	}
 
@@ -338,12 +333,12 @@
 			debounceTimer = null;
 		}
 		// Capture whatever is currently in the editor
-		saveOffline();
+		saveOffline(); // async — fire-and-forget is fine here
 	}
 
 	async function saveDocument() {
 		if (!isOnline) {
-			saveOffline();
+			await saveOffline();
 			return;
 		}
 		saveStatus = "Saving...";
@@ -369,20 +364,25 @@
 		}
 	}
 
-	onMount(() => {
+	onMount(async () => {
 		// Register online/offline listeners
 		window.addEventListener('online',  handleOnline);
 		window.addEventListener('offline', handleOffline);
 
 		// If we already have an offline save from a previous session, mark it
-		if (localStorage.getItem(OFFLINE_STORAGE_KEY)) {
-			hasPendingOfflineSave = true;
-			if (isOnline) {
-				// We're online — will flush once editor is ready after a short tick
-				setTimeout(flushOfflineSave, 500);
-			} else {
-				saveStatus = "Offline";
+		try {
+			const pending = await getOfflineDoc(docId);
+			if (pending) {
+				hasPendingOfflineSave = true;
+				if (isOnline) {
+					// We're online — flush once the editor is fully mounted
+					setTimeout(flushOfflineSave, 500);
+				} else {
+					saveStatus = "Offline";
+				}
 			}
+		} catch (e) {
+			console.warn('Could not read IndexedDB offline save:', e);
 		}
 
 		editor = new Editor({
